@@ -152,16 +152,34 @@ class RuleBasedPrescriptionParser {
             line.contains("보호제")
     }
 
-    private fun extractPharmacyName(lines: List<String>, rawText: String): String {
-        if (rawText.contains("새솔약국")) return "새솔약국"
+        private fun extractPharmacyName(lines: List<String>, rawText: String): String {
+        val compactAll = rawText.replace(Regex("""\s+"""), "")
+        if ("새솔약국" in compactAll) return "새솔약국"
+
+        // 1) '상호' 또는 '상 호' 근처 라인에서 '약국'이 포함된 토큰 탐색
         for (i in lines.indices) {
-            if (lines[i].contains("상호") || lines[i] == "상 호") {
-                val window = lines.drop(i).take(3).joinToString(" ")
-                val match = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(window)
-                if (match != null) return match.groupValues[1]
+            val compactLine = lines[i].replace(" ", "")
+            if ("상호" in compactLine) {
+                val windowLines = (maxOf(0, i - 1)..minOf(lines.lastIndex, i + 4))
+                    .map { lines[it].trim() }
+                for (candidate in windowLines) {
+                    val compactCand = candidate.replace(" ", "")
+                    val m = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(compactCand)
+                    if (m != null) return m.groupValues[1]
+                }
             }
         }
-        val fallbackMatch = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(rawText)
+
+        // 2) 전체 라인 중 '약국'으로 끝나는 한글 명칭 탐색 (조제약/복약안내 등 제외)
+        for (line in lines) {
+            val compactCand = line.replace(" ", "")
+            if (compactCand.endsWith("약국") && compactCand.length in 3..16 && "조제약" !in compactCand) {
+                return compactCand
+            }
+        }
+
+        // 3) 본문 전체에서 '~약국' 패턴 추출
+        val fallbackMatch = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(compactAll)
         return fallbackMatch?.groupValues?.get(1) ?: ""
     }
 
@@ -199,3 +217,4 @@ class RuleBasedPrescriptionParser {
         return Regex("""\b(\d{1,2})\s*일\b""").find(window)?.groupValues?.get(1)
     }
 }
+
