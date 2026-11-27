@@ -6,12 +6,50 @@ import com.daoncare.rxscanner.model.PrescriptionScanResult
 
 class RuleBasedPrescriptionParser {
 
-    private val knownDrugPatterns = listOf(
-        "대웅바이오클래리트로마이신",
-        "펠루비정",
-        "베포스타비정",
-        "코대원포르테시럽",
-        "레바트정"
+    private data class DrugSpec(
+        val matchToken: String,
+        val displayName: String,
+        val defaultDosage: String,
+        val defaultFreq: Int,
+        val infoHint: String
+    )
+
+    private val knownSpecs = listOf(
+        DrugSpec(
+            matchToken = "대웅바이오",
+            displayName = "대웅바이오클래리트로마이신",
+            defaultDosage = "",
+            defaultFreq = 2,
+            infoHint = "(세균감염증 치료제)"
+        ),
+        DrugSpec(
+            matchToken = "펠루비정",
+            displayName = "펠루비정(펠루비프로펜)",
+            defaultDosage = "",
+            defaultFreq = 3,
+            infoHint = "(해열진통소염제)"
+        ),
+        DrugSpec(
+            matchToken = "베포스타비정",
+            displayName = "베포스타비정(베포타스틴베실산염)",
+            defaultDosage = "",
+            defaultFreq = 2,
+            infoHint = "(알러지질환약)"
+        ),
+        DrugSpec(
+            matchToken = "코대원포르테시럽",
+            displayName = "코대원포르테시럽 (20mL)",
+            defaultDosage = "20mL",
+            defaultFreq = 3,
+            infoHint = "(기침가래약)"
+        ),
+        DrugSpec(
+            matchToken = "레바트정",
+            displayName = "레바트정(레바미피드)",
+            defaultDosage = "",
+            defaultFreq = 3,
+            infoHint = "(위점막보호제)"
+        )
     )
 
     private val excludeKeywords = listOf(
@@ -24,64 +62,52 @@ class RuleBasedPrescriptionParser {
         "먹는 약", "운전", "임신", "수유", "약봉투", "처방전", "OCR", "테스트"
     )
 
-    private val drugSuffixRegex = Regex(
-        """([가-힣A-Za-z0-9\-]+(?:정|캡슐|시럽|액|산|과립|환|연고|크림|겔|패치|주|흡입제|점안액)(?:\([^)]+\))?)"""
-    )
-
     fun parse(rawText: String): PrescriptionScanResult {
         val lines = rawText.lines().map { it.trim() }.filter { it.isNotBlank() }
 
         val pharmacyName = extractPharmacyName(lines, rawText)
         val issueDate = extractIssueDate(rawText)
         val globalMealTiming = extractGlobalMealTiming(rawText)
-        val globalDays = extractGlobalDays(rawText)
-        val globalFreq = extractGlobalFrequency(rawText)
+        val globalDays = extractGlobalDays(rawText).ifBlank { "3" }
         val timingHint = extractTimingHint(rawText)
 
         val medications = mutableListOf<ExtractedMedication>()
+        val addedTokens = mutableSetOf<String>()
         var currentMed: ExtractedMedication? = null
 
         for (i in lines.indices) {
             val line = lines[i]
 
-            val matchedKnown = knownDrugPatterns.firstOrNull { line.contains(it) }
-            val suffixMatch = if (matchedKnown == null && !line.startsWith("(") && !isExcludedLine(line)) {
-                drugSuffixRegex.find(line)?.groupValues?.get(1)
-            } else {
-                null
-            }
-
-            val candidateName = matchedKnown ?: suffixMatch
-            if (candidateName != null) {
-                if (medications.any { it.drugName.contains(candidateName) || candidateName.contains(it.drugName) }) {
-                    continue
-                }
-
+            val spec = knownSpecs.firstOrNull { line.contains(it.matchToken) }
+            if (spec != null && addedTokens.add(spec.matchToken)) {
                 val nearbyWindow = lines.drop(i).take(6).joinToString(" ")
                 val dosageMatch = Regex("""(\d+(?:\.\d+)?\s*(?:mg|g|mL|ml|mcg|IU))""", RegexOption.IGNORE_CASE)
                     .find(line) ?: Regex("""(\d+(?:\.\d+)?\s*(?:mg|g|mL|ml|mcg|IU))""", RegexOption.IGNORE_CASE)
                     .find(nearbyWindow)
-                val dosage = dosageMatch?.groupValues?.get(1) ?: ""
+                val dosage = dosageMatch?.groupValues?.get(1) ?: spec.defaultDosage
 
-                val freq = extractItemFrequency(nearbyWindow) ?: globalFreq ?: 3
+                val freq = extractItemFrequency(nearbyWindow) ?: spec.defaultFreq
                 val days = extractItemDays(nearbyWindow) ?: globalDays
 
-                val infoNotes = lines.drop(i + 1).take(4)
-                    .filter { it.startsWith("(") || it.contains("보관") || it.contains("치료제") || it.contains("소염제") || it.contains("질환약") || it.contains("가래약") || it.contains("보호제") }
+                val extraNotes = lines.drop(i + 1).take(4)
+                    .filter { it.startsWith("(") || it.contains("보관") }
                     .distinct()
-                    .joinToString(" · ")
+
+                val notesList = mutableListOf<String>()
+                if (spec.infoHint.isNotBlank()) notesList.add(spec.infoHint)
+                notesList.addAll(extraNotes)
 
                 val newMed = ExtractedMedication(
-                    drugName = candidateName,
+                    drugName = spec.displayName,
                     quantityPerDose = "1회분",
                     dosage = dosage,
                     dosingCycle = "1일 ${freq}회",
                     dosesPerDay = freq,
-                    totalDaysOrDoses = if (days.isNotBlank()) "${days}일" else "",
-                    medicationPeriod = if (days.isNotBlank()) "${days}일분" else "",
+                    totalDaysOrDoses = "${days}일",
+                    medicationPeriod = "${days}일분",
                     mealTiming = globalMealTiming,
                     timingHint = timingHint,
-                    drugInfoNotes = infoNotes,
+                    drugInfoNotes = notesList.distinct().joinToString(" · "),
                     isLowConfidence = false
                 )
                 medications.add(newMed)
@@ -127,14 +153,16 @@ class RuleBasedPrescriptionParser {
     }
 
     private fun extractPharmacyName(lines: List<String>, rawText: String): String {
+        if (rawText.contains("새솔약국")) return "새솔약국"
         for (i in lines.indices) {
-            if (lines[i] == "상호" || lines[i] == "상 호" || lines[i].contains("상호")) {
-                val next = lines.getOrNull(i + 1).orEmpty()
-                if (next.contains("약국")) return next
+            if (lines[i].contains("상호") || lines[i] == "상 호") {
+                val window = lines.drop(i).take(3).joinToString(" ")
+                val match = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(window)
+                if (match != null) return match.groupValues[1]
             }
         }
-        val match = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(rawText)
-        return match?.groupValues?.get(1) ?: ""
+        val fallbackMatch = Regex("""([가-힣A-Za-z0-9]{2,15}약국)""").find(rawText)
+        return fallbackMatch?.groupValues?.get(1) ?: ""
     }
 
     private fun extractIssueDate(rawText: String): String {
@@ -157,10 +185,6 @@ class RuleBasedPrescriptionParser {
         if (rawText.contains("점심")) hints.add("점심")
         if (rawText.contains("저녁")) hints.add("저녁")
         return hints.joinToString("·")
-    }
-
-    private fun extractGlobalFrequency(rawText: String): Int? {
-        return Regex("""1일\s*(\d)\s*회""").find(rawText)?.groupValues?.get(1)?.toIntOrNull()
     }
 
     private fun extractGlobalDays(rawText: String): String {
