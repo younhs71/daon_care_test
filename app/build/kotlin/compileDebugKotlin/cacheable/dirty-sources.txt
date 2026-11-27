@@ -1,0 +1,8 @@
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\contract\RxScannerMergeContract.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\ai\GeminiNanoExtractor.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\model\PrescriptionModels.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\ui\PrescriptionScannerScreen.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\ocr\KoreanOcrEngine.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\MainActivity.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\parser\RuleBasedPrescriptionParser.kt
+C:\dev\daon_care_test\app\src\main\java\com\daoncare\rxscanner\repository\PrescriptionScanRepository.kt
